@@ -204,6 +204,12 @@ impl Bot {
             "list" => {
                 self.list_profiles(message, rest).await?;
             }
+            "hide" => {
+                self.set_hidden(message, rest, true).await?;
+            }
+            "unhide" => {
+                self.set_hidden(message, rest, false).await?;
+            }
             "author" => {
                 let Some(reply_id) = message.replies.as_ref().and_then(|r| r.first()) else {
                     return Ok(());

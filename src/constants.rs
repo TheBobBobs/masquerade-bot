@@ -13,6 +13,10 @@ To remove a field
 ## List
 `@%DISPLAY_NAME% list`
 `@%DISPLAY_NAME% list all` include hidden profiles (DM only)
+## Hide
+Hidden profiles are left out of `list` but can still be used.
+`@%DISPLAY_NAME% hide {name}`
+`@%DISPLAY_NAME% unhide {name}`
 ## Info
 `@%DISPLAY_NAME% author` reply to a message to get original author
 ## Default
