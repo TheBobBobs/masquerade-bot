@@ -86,10 +86,10 @@ impl Bot {
         let channel_id = &message.channel_id;
         let channel = self.cache.get_channel(channel_id).await.unwrap();
         let server_id = channel.server_id();
-        if let Some(server_id) = server_id {
-            if self.db.is_proxy_off(user_id, server_id).await {
-                return Ok(Vec::new());
-            }
+        if let Some(server_id) = server_id
+            && self.db.is_proxy_off(user_id, server_id).await
+        {
+            return Ok(Vec::new());
         }
         let mut default = self.db.get_default(user_id, server_id, channel_id).await;
 
@@ -106,16 +106,16 @@ impl Bot {
         };
         let mut current: Option<(Profile, String)> = None;
         for line in content.lines() {
-            if let Some((name, rest)) = line.split_once(';').map(|(n, r)| (n, r.trim_start())) {
-                if let Some(mut profile) = self.db.get_profile(&message.author_id, name).await {
-                    self.check_profile(&message.channel_id, &message.author_id, &mut profile)
-                        .await?;
-                    if let Some(c) = current {
-                        push(c);
-                    }
-                    current = Some((profile, rest.to_string()));
-                    continue;
+            if let Some((name, rest)) = line.split_once(';').map(|(n, r)| (n, r.trim_start()))
+                && let Some(mut profile) = self.db.get_profile(&message.author_id, name).await
+            {
+                self.check_profile(&message.channel_id, &message.author_id, &mut profile)
+                    .await?;
+                if let Some(c) = current {
+                    push(c);
                 }
+                current = Some((profile, rest.to_string()));
+                continue;
             }
             if let Some(c) = &mut current {
                 c.1.push('\n');

@@ -159,7 +159,7 @@ impl Bot {
         let send = SendableMessage::new()
             .content(format!(
                 "Exported {count} profile{}!",
-                if count > 1 { "s" } else { "" }
+                if count != 1 { "s" } else { "" }
             ))
             .attachment(id);
         let dm = self.cache.fetch_dm(&self.http, &message.author_id).await?;

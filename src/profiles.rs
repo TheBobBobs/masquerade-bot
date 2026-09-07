@@ -4,7 +4,7 @@ use volty::{
     http::routes::channels::message_send::SendableMessage, types::channels::message::Message,
 };
 
-use crate::{models::Profile, Bot, Error};
+use crate::{Bot, Error, models::Profile};
 
 fn parse_colours(colours: &str) -> String {
     let colours = colours.trim();
@@ -63,11 +63,12 @@ impl Bot {
             .map(|(n, d)| (n, Some(d.to_string())))
             .unwrap_or((args, None));
 
-        if matches!(command, EditCommand::Avatar) && value.is_none() {
-            if let Some(attachment) = message.attachments.as_ref().and_then(|a| a.first()) {
-                let api_info = self.cache.api_info(&self.http).await?;
-                value = Some(attachment.autumn_url(&api_info.features.autumn.url));
-            }
+        if matches!(command, EditCommand::Avatar)
+            && value.is_none()
+            && let Some(attachment) = message.attachments.as_ref().and_then(|a| a.first())
+        {
+            let api_info = self.cache.api_info(&self.http).await?;
+            value = Some(attachment.autumn_url(&api_info.features.autumn.url));
         }
         if value.is_none() {
             let content = match self.db.get_profile(&message.author_id, name).await {
