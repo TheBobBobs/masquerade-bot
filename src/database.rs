@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use futures::stream::TryStreamExt;
 use mongodb::{
@@ -96,12 +96,26 @@ struct DefaultProfileDoc {
     name: String,
 }
 
+#[derive(Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
+pub struct ProxyOffDocId {
+    pub user_id: String,
+    pub server_id: String,
+}
+
+/// Presence of a document means the user has turned proxying off in that server.
+#[derive(Deserialize, Serialize)]
+struct ProxyOffDoc {
+    _id: ProxyOffDocId,
+}
+
 pub struct DB {
     authors_col: Collection<AuthorDoc>,
     profiles_col: Collection<ProfileDoc>,
     defaults_col: Collection<DefaultProfileDoc>,
+    proxy_off_col: Collection<ProxyOffDoc>,
     user_profiles: RwLock<HashMap<String, HashMap<String, Profile>>>,
     user_defaults: RwLock<HashMap<DefaultProfileDocId, String>>,
+    proxy_off: RwLock<HashSet<ProxyOffDocId>>,
 }
 
 impl DB {
@@ -111,6 +125,7 @@ impl DB {
         authors_col: &str,
         profiles_col: &str,
         defaults_col: &str,
+        proxy_off_col: &str,
     ) -> Result<DB, mongodb::error::Error> {
         let mut options = ClientOptions::parse(uri).await?;
         options.app_name = Some("MasqueradeBot".to_string());
@@ -119,8 +134,10 @@ impl DB {
         let authors_col = db.collection(authors_col);
         let profiles_col = db.collection::<ProfileDoc>(profiles_col);
         let defaults_col = db.collection::<DefaultProfileDoc>(defaults_col);
+        let proxy_off_col = db.collection::<ProxyOffDoc>(proxy_off_col);
         let mut user_profiles: HashMap<String, HashMap<String, Profile>> = HashMap::new();
         let mut user_defaults: HashMap<DefaultProfileDocId, String> = HashMap::new();
+        let mut proxy_off: HashSet<ProxyOffDocId> = HashSet::new();
 
         let mut cursor = profiles_col.find(doc! {}).await?;
         while let Some(profile_doc) = cursor.try_next().await? {
@@ -139,12 +156,19 @@ impl DB {
             user_defaults.insert(default_doc._id, default_doc.name);
         }
 
+        let mut cursor = proxy_off_col.find(doc! {}).await?;
+        while let Some(proxy_off_doc) = cursor.try_next().await? {
+            proxy_off.insert(proxy_off_doc._id);
+        }
+
         Ok(Self {
             authors_col,
             profiles_col,
             defaults_col,
+            proxy_off_col,
             user_profiles: RwLock::new(user_profiles),
             user_defaults: RwLock::new(user_defaults),
+            proxy_off: RwLock::new(proxy_off),
         })
     }
 
@@ -277,6 +301,33 @@ impl DB {
             .upsert(true)
             .await?;
         user_defaults.insert(id, name.to_string());
+        Ok(())
+    }
+
+    pub async fn is_proxy_off(&self, user_id: &str, server_id: &str) -> bool {
+        let id = ProxyOffDocId {
+            user_id: user_id.to_string(),
+            server_id: server_id.to_string(),
+        };
+        self.proxy_off.read().await.contains(&id)
+    }
+
+    pub async fn set_proxy_off(&self, id: ProxyOffDocId, off: bool) -> Result<(), Error> {
+        let mut proxy_off = self.proxy_off.write().await;
+        if off == proxy_off.contains(&id) {
+            return Ok(());
+        }
+        if off {
+            self.proxy_off_col
+                .insert_one(ProxyOffDoc { _id: id.clone() })
+                .await?;
+            proxy_off.insert(id);
+        } else {
+            self.proxy_off_col
+                .delete_one(doc! {"_id": to_document(&id).unwrap()})
+                .await?;
+            proxy_off.remove(&id);
+        }
         Ok(())
     }
 }
