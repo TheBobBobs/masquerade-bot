@@ -59,3 +59,17 @@ impl From<Profile> for Masquerade {
         }
     }
 }
+
+impl std::fmt::Display for Profile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Name: {}\nDisplay Name: {}\nAvatar: {}\nColour: {}, Hidden: {}",
+            self.name,
+            self.display_name.as_deref().unwrap_or(""),
+            self.avatar.as_deref().unwrap_or(""),
+            self.colour.as_deref().unwrap_or(""),
+            self.hidden
+        )
+    }
+}

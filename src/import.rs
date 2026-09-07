@@ -1,7 +1,7 @@
 use crate::{models::Profile, Bot, Error};
 use serde::Deserialize;
 use validator::Validate;
-use volty::prelude::*;
+use volty::{prelude::*, types::util::regex::RE_USERNAME};
 
 #[derive(Deserialize)]
 #[serde(untagged)]
@@ -11,15 +11,18 @@ enum Export {
 }
 
 impl Export {
-    fn into_profiles(self, user_id: &str) -> Result<Vec<Profile>, validator::ValidationErrors> {
-        let profiles: Vec<Profile> = match self {
+    fn into_profiles(
+        self,
+        user_id: &str,
+    ) -> Result<Vec<Profile>, (Profile, validator::ValidationErrors)> {
+        let mut profiles: Vec<Profile> = match self {
             Export::PluralKit(export) => export
                 .members
                 .into_iter()
                 .map(|m| Profile {
                     user_id: user_id.to_string(),
-                    name: m.name,
-                    display_name: m.display_name,
+                    name: m.name.trim().to_string(),
+                    display_name: m.display_name.map(|d| d.trim().to_string()),
                     avatar: m.avatar_url,
                     colour: m.color.map(|c| format!("#{c}")),
                     hidden: m
@@ -33,17 +36,34 @@ impl Export {
                 .into_iter()
                 .map(|m| Profile {
                     user_id: user_id.to_string(),
-                    name: m.name,
-                    display_name: m.nick,
+                    name: m.name.trim().to_string(),
+                    display_name: m.nick.map(|n| n.trim().to_string()),
                     avatar: m.avatar_url,
                     colour: None,
                     hidden: false,
                 })
                 .collect(),
         };
-        if let Some(e) = profiles.iter().find_map(|p| p.validate().err()) {
-            return Err(e);
+
+        for profile in &mut profiles {
+            if !RE_USERNAME.is_match(&profile.name) {
+                if profile.display_name.is_none() {
+                    profile.display_name = Some(profile.name.clone());
+                }
+                profile.name = profile.name.replace(' ', "_").replace(
+                    |c: char| !(c.is_alphanumeric() || ['_', '-'].contains(&c)),
+                    "",
+                );
+            }
         }
+
+        if let Some((p, e)) = profiles
+            .iter()
+            .find_map(|p| p.validate().err().map(|e| (p, e)))
+        {
+            return Err((p.clone(), e));
+        }
+
         Ok(profiles)
     }
 }
@@ -111,7 +131,9 @@ impl Bot {
                     .await?;
                 return Ok(());
             };
-            match serde_json::from_str(&text) {
+            let mut text = text.trim_start_matches(|c| c != '{');
+            text = text.trim_end_matches(|c| c != '}');
+            match serde_json::from_str(text) {
                 Ok(export) => export,
                 Err(e) => {
                     self.http
@@ -121,7 +143,15 @@ impl Bot {
                 }
             }
         };
-        let profiles = export.into_profiles(&message.author_id)?;
+        let profiles = match export.into_profiles(&message.author_id) {
+            Ok(p) => p,
+            Err((p, e)) => {
+                self.http
+                    .send_message(&message.channel_id, format!("Invalid profile\n{p}"))
+                    .await?;
+                return Err(e.into());
+            }
+        };
         let count = profiles.len();
 
         for profile in profiles {
