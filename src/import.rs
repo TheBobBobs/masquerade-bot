@@ -1,4 +1,4 @@
-use crate::{models::Profile, Bot, Error};
+use crate::{Bot, Error, models::Profile};
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 use volty::{
@@ -251,7 +251,7 @@ mod tests {
             {"name": "carol", "privacy": null},
             {"name": "dave"}
         ]}"#;
-        let export: PluralKitExport = serde_json::from_str(json).unwrap();
+        let export: Export = serde_json::from_str(json).unwrap();
         let profiles = export.into_profiles("user").unwrap();
         let hidden: Vec<_> = profiles
             .iter()
