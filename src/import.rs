@@ -1,11 +1,16 @@
 use crate::{models::Profile, Bot, Error};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use validator::Validate;
-use volty::{prelude::*, types::util::regex::RE_USERNAME};
+use volty::{
+    http::routes::autumn::upload_file::{Tag, UploadFile, UploadResponse},
+    prelude::*,
+    types::util::regex::RE_USERNAME,
+};
 
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum Export {
+    Masq(MasqExport),
     PluralKit(PluralKitExport),
     Tupper(TupperBoxExport),
 }
@@ -16,6 +21,18 @@ impl Export {
         user_id: &str,
     ) -> Result<Vec<Profile>, (Profile, validator::ValidationErrors)> {
         let mut profiles: Vec<Profile> = match self {
+            Export::Masq(export) => export
+                .profiles
+                .into_iter()
+                .map(|p| Profile {
+                    user_id: user_id.to_string(),
+                    name: p.name.trim().to_string(),
+                    display_name: p.display_name.map(|d| d.trim().to_string()),
+                    avatar: p.avatar_url,
+                    colour: p.color.map(|c| c.to_string()),
+                    hidden: p.hidden.unwrap_or(false),
+                })
+                .collect(),
             Export::PluralKit(export) => export
                 .members
                 .into_iter()
@@ -68,6 +85,20 @@ impl Export {
     }
 }
 
+#[derive(Deserialize, Serialize)]
+struct MasqExport {
+    profiles: Vec<MasqMember>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct MasqMember {
+    name: String,
+    display_name: Option<String>,
+    avatar_url: Option<String>,
+    color: Option<String>,
+    hidden: Option<bool>,
+}
+
 #[derive(Deserialize)]
 struct PluralKitExport {
     members: Vec<PluralKitMember>,
@@ -100,6 +131,42 @@ struct TupperBoxMember {
 }
 
 impl Bot {
+    pub async fn export_command(&self, message: &Message, _args: &str) -> Result<(), Error> {
+        let Some(profiles) = self.db.get_profiles(&message.author_id, true).await else {
+            self.http
+                .send_message(&message.channel_id, "No profiles found!")
+                .await?;
+            return Ok(());
+        };
+        let count = profiles.len();
+        let export = MasqExport {
+            profiles: profiles
+                .into_iter()
+                .map(|p| MasqMember {
+                    name: p.name,
+                    display_name: p.display_name,
+                    avatar_url: p.avatar,
+                    color: p.colour,
+                    hidden: Some(p.hidden),
+                })
+                .collect(),
+        };
+
+        let bytes = serde_json::to_string_pretty(&export).unwrap().into_bytes();
+        let file = UploadFile::new(bytes, Some("export.json"));
+        let UploadResponse { id } = self.http.upload_file(Tag::Attachments, file).await?;
+
+        let send = SendableMessage::new()
+            .content(format!(
+                "Exported {count} profile{}!",
+                if count > 1 { "s" } else { "" }
+            ))
+            .attachment(id);
+        let dm = self.cache.fetch_dm(&self.http, &message.author_id).await?;
+        self.http.send_message(dm.id(), send).await?;
+        Ok(())
+    }
+
     pub async fn import_command(&self, message: &Message, _args: &str) -> Result<(), Error> {
         let Some([attatchment, ..]) = message.attachments.as_deref() else {
             self.http

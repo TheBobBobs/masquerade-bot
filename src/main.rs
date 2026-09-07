@@ -270,6 +270,9 @@ impl Bot {
             "import" => {
                 self.import_command(message, rest).await?;
             }
+            "export" => {
+                self.export_command(message, rest).await?;
+            }
             "proxy" => {
                 self.proxy_command(message, rest).await?;
             }
@@ -294,12 +297,12 @@ impl Bot {
                     let dm = match self.cache.fetch_dm(&self.http, &message.author_id).await {
                         Ok(dm) => dm,
                         Err(e) => {
-                            log::error!("Opening DM for {}\n{e:?}", &message.author_id);
+                            log::error!("Opening DM for {}\n{e:?}", message.author_id);
                             return;
                         }
                     };
                     if let Err(e) = self.http.send_message(dm.id(), content).await {
-                        log::error!("Sending DM to {}\n{e:?}", &message.author_id);
+                        log::error!("Sending DM to {}\n{e:?}", message.author_id);
                     }
                     return;
                 }
@@ -438,7 +441,7 @@ impl RawHandler for Bot {
 
 #[tokio::main]
 async fn main() {
-    dotenvy::dotenv().unwrap();
+    dotenvy::dotenv().expect("Missing .env file");
     env_logger::init();
     let db = {
         let uri = std::env::var("MONGO_URI").expect("Missing Env Variable: MONGO_URI");

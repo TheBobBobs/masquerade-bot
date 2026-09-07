@@ -215,8 +215,8 @@ impl DB {
         profile.validate()?;
         let mut user_profiles = self.user_profiles.write().await;
         let profiles = user_profiles.entry(user_id.to_string()).or_default();
-        if !profiles.contains_key(&profile.name) && profiles.len() >= 256 {
-            return Err(Error::UserMaxProfiles(256));
+        if !profiles.contains_key(&profile.name) && profiles.len() >= 1024 {
+            return Err(Error::UserMaxProfiles(1024));
         }
 
         let profile_doc: ProfileDoc = profile.clone().into();
