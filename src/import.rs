@@ -9,11 +9,17 @@ struct PluralKitExport {
 }
 
 #[derive(Deserialize)]
+struct PluralKitPrivacy {
+    visibility: Option<String>,
+}
+
+#[derive(Deserialize)]
 struct PluralKitMember {
     name: String,
     display_name: Option<String>,
     avatar_url: Option<String>,
     color: Option<String>,
+    privacy: Option<PluralKitPrivacy>,
 }
 
 impl PluralKitExport {
@@ -27,6 +33,10 @@ impl PluralKitExport {
                 display_name: m.display_name,
                 avatar: m.avatar_url,
                 colour: m.color.map(|c| format!("#{c}")),
+                hidden: m
+                    .privacy
+                    .and_then(|p| p.visibility)
+                    .is_some_and(|v| v == "private"),
             })
             .collect();
         if let Some(e) = profiles.iter().find_map(|p| p.validate().err()) {
@@ -96,5 +106,35 @@ impl Bot {
             .await?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn import_hides_members_with_private_visibility() {
+        let json = r#"{"members": [
+            {"name": "alice", "privacy": {"visibility": "public"}},
+            {"name": "bob", "privacy": {"visibility": "private"}},
+            {"name": "carol", "privacy": null},
+            {"name": "dave"}
+        ]}"#;
+        let export: PluralKitExport = serde_json::from_str(json).unwrap();
+        let profiles = export.into_profiles("user").unwrap();
+        let hidden: Vec<_> = profiles
+            .iter()
+            .map(|p| (p.name.as_str(), p.hidden))
+            .collect();
+        assert_eq!(
+            hidden,
+            [
+                ("alice", false),
+                ("bob", true),
+                ("carol", false),
+                ("dave", false)
+            ]
+        );
     }
 }

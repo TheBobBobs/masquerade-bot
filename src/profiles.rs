@@ -122,6 +122,28 @@ impl Bot {
         Ok(())
     }
 
+    pub async fn set_hidden(
+        &self,
+        message: &Message,
+        args: &str,
+        hidden: bool,
+    ) -> Result<(), Error> {
+        let name = args;
+        let content = match self.db.get_profile(&message.author_id, name).await {
+            Some(mut profile) => {
+                profile.hidden = hidden;
+                self.db.save_profile(&message.author_id, profile).await?;
+                "Success!".to_string()
+            }
+            None => format!("Profile not found!\n{name}"),
+        };
+        let send = SendableMessage::new()
+            .content(content)
+            .reply(message.id.clone());
+        self.http.send_message(&message.channel_id, send).await?;
+        Ok(())
+    }
+
     pub async fn delete_profile(&self, message: &Message, args: &str) -> Result<(), Error> {
         let name = args;
         let profile = self.db.delete_profile(&message.author_id, name).await?;
