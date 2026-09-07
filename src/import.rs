@@ -4,6 +4,51 @@ use validator::Validate;
 use volty::prelude::*;
 
 #[derive(Deserialize)]
+#[serde(untagged)]
+enum Export {
+    PluralKit(PluralKitExport),
+    Tupper(TupperBoxExport),
+}
+
+impl Export {
+    fn into_profiles(self, user_id: &str) -> Result<Vec<Profile>, validator::ValidationErrors> {
+        let profiles: Vec<Profile> = match self {
+            Export::PluralKit(export) => export
+                .members
+                .into_iter()
+                .map(|m| Profile {
+                    user_id: user_id.to_string(),
+                    name: m.name,
+                    display_name: m.display_name,
+                    avatar: m.avatar_url,
+                    colour: m.color.map(|c| format!("#{c}")),
+                    hidden: m
+                        .privacy
+                        .and_then(|p| p.visibility)
+                        .is_some_and(|v| v == "private"),
+                })
+                .collect(),
+            Export::Tupper(export) => export
+                .tuppers
+                .into_iter()
+                .map(|m| Profile {
+                    user_id: user_id.to_string(),
+                    name: m.name,
+                    display_name: m.nick,
+                    avatar: m.avatar_url,
+                    colour: None,
+                    hidden: false,
+                })
+                .collect(),
+        };
+        if let Some(e) = profiles.iter().find_map(|p| p.validate().err()) {
+            return Err(e);
+        }
+        Ok(profiles)
+    }
+}
+
+#[derive(Deserialize)]
 struct PluralKitExport {
     members: Vec<PluralKitMember>,
 }
@@ -22,28 +67,16 @@ struct PluralKitMember {
     privacy: Option<PluralKitPrivacy>,
 }
 
-impl PluralKitExport {
-    fn into_profiles(self, user_id: &str) -> Result<Vec<Profile>, validator::ValidationErrors> {
-        let profiles: Vec<_> = self
-            .members
-            .into_iter()
-            .map(|m| Profile {
-                user_id: user_id.to_string(),
-                name: m.name,
-                display_name: m.display_name,
-                avatar: m.avatar_url,
-                colour: m.color.map(|c| format!("#{c}")),
-                hidden: m
-                    .privacy
-                    .and_then(|p| p.visibility)
-                    .is_some_and(|v| v == "private"),
-            })
-            .collect();
-        if let Some(e) = profiles.iter().find_map(|p| p.validate().err()) {
-            return Err(e);
-        }
-        Ok(profiles)
-    }
+#[derive(Deserialize)]
+struct TupperBoxExport {
+    tuppers: Vec<TupperBoxMember>,
+}
+
+#[derive(Deserialize)]
+struct TupperBoxMember {
+    name: String,
+    nick: Option<String>,
+    avatar_url: Option<String>,
 }
 
 impl Bot {
@@ -52,7 +85,7 @@ impl Bot {
             self.http
                 .send_message(
                     &message.channel_id,
-                    "Command requires a json file from running pk;export",
+                    "Command requires a json file from running pk;export or tul!export",
                 )
                 .await?;
             return Ok(());
@@ -63,7 +96,7 @@ impl Bot {
                 .await?;
             return Ok(());
         }
-        let export: PluralKitExport = {
+        let export: Export = {
             let api_info = self.cache.api_info(&self.http).await?;
             let url = attatchment.autumn_url(&api_info.features.autumn.url);
             let Ok(response) = self.requests.get(url).send().await else {
