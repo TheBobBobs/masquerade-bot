@@ -11,6 +11,7 @@ mod import;
 mod listing;
 mod models;
 mod profiles;
+mod proxy;
 
 use constants::HELP_MESSAGE;
 use database::DB;
@@ -85,6 +86,11 @@ impl Bot {
         let channel_id = &message.channel_id;
         let channel = self.cache.get_channel(channel_id).await.unwrap();
         let server_id = channel.server_id();
+        if let Some(server_id) = server_id {
+            if self.db.is_proxy_off(user_id, server_id).await {
+                return Ok(Vec::new());
+            }
+        }
         let mut default = self.db.get_default(user_id, server_id, channel_id).await;
 
         let mut sendables = Vec::new();
@@ -224,6 +230,9 @@ impl Bot {
             }
             "import" => {
                 self.import_command(message, rest).await?;
+            }
+            "proxy" => {
+                self.proxy_command(message, rest).await?;
             }
             _ => {
                 let bot_user = self.cache.user().await;
@@ -401,9 +410,18 @@ async fn main() {
             std::env::var("MONGO_PROFILES_COL").expect("Missing Env Variable: MONGO_PROFILES_COL");
         let defaults_col =
             std::env::var("MONGO_DEFAULTS_COL").expect("Missing Env Variable: MONGO_DEFAULTS_COL");
-        DB::new(&uri, &db_name, &authors_col, &profiles_col, &defaults_col)
-            .await
-            .unwrap()
+        let proxy_off_col = std::env::var("MONGO_PROXY_OFF_COL")
+            .expect("Missing Env Variable: MONGO_PROXY_OFF_COL");
+        DB::new(
+            &uri,
+            &db_name,
+            &authors_col,
+            &profiles_col,
+            &defaults_col,
+            &proxy_off_col,
+        )
+        .await
+        .unwrap()
     };
     let requests = reqwest::Client::new();
 

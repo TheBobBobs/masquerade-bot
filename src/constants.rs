@@ -21,6 +21,10 @@ Messages sent without a prefix will use your default profile if set.
 `@%DISPLAY_NAME% channel_default {name}` set a channel default profile
 To remove defaults use the same command but without a name
 `@%DISPLAY_NAME% default` remove global default profile
+## Proxy
+`@%DISPLAY_NAME% proxy off` stop proxying your messages in this server
+`@%DISPLAY_NAME% proxy on` resume proxying in this server
+`@%DISPLAY_NAME% proxy` show whether proxying is on here
 ## Permissions
 -Required
 `Masquerade` users will also need this.
