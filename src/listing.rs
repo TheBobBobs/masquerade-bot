@@ -36,26 +36,25 @@ pub fn get_page(profiles: &[Profile], page: usize, include_hidden: bool) -> Stri
     }
 
     for p in &profiles[start..end] {
-        if p.colour.as_ref().is_some_and(|c| RE.is_match(c)) {
-            let colour = p.colour.as_deref().unwrap();
-            write!(
-                &mut text,
-                "\n|$\\color{{{}}}\\textsf{{{}}}$",
-                colour, p.name
-            )
-            .unwrap();
+        // The name stays plain text so it can be read and copied as-is.
+        // A colour that KaTeX can understand gets a swatch next to its value.
+        let colour = p.colour.as_deref().unwrap_or("");
+        let swatch = if RE.is_match(colour) {
+            format!("$$\\color{{{colour}}}\\blacksquare$$ ")
         } else {
-            write!(&mut text, "\n|{}", p.name).unwrap();
-        }
+            String::new()
+        };
         write!(
             &mut text,
-            "|{}|{}|{}|",
+            "\n|{}|{}|{}|{}{}|",
+            p.name,
             p.display_name.as_deref().unwrap_or(""),
             p.avatar
                 .as_ref()
                 .map(|u| format!("[Link](<{u}>)"))
                 .unwrap_or_default(),
-            p.colour.as_deref().unwrap_or("")
+            swatch,
+            colour
         )
         .unwrap();
         if include_hidden {
@@ -145,5 +144,32 @@ impl Bot {
             .edit_message(&message.channel_id, &message.id, page)
             .await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn profile(name: &str, colour: Option<&str>) -> Profile {
+        let mut p = Profile::new("user", name);
+        p.colour = colour.map(str::to_string);
+        p
+    }
+
+    #[test]
+    fn list_keeps_names_plain_and_swatches_colours() {
+        let profiles = [
+            profile("J", Some("#f5a9b8")),
+            profile("some_name", Some("blue")),
+            profile("gradient", Some("linear-gradient(to right,#f00,#00f)")),
+            profile("plain", None),
+        ];
+        let page = get_page(&profiles, 0, false);
+        let rows: Vec<&str> = page.lines().skip(3).collect();
+        assert_eq!(rows[0], "|J|||$$\\color{#f5a9b8}\\blacksquare$$ #f5a9b8|");
+        assert_eq!(rows[1], "|some_name|||$$\\color{blue}\\blacksquare$$ blue|");
+        assert_eq!(rows[2], "|gradient|||linear-gradient(to right,#f00,#00f)|");
+        assert_eq!(rows[3], "|plain||||");
     }
 }
