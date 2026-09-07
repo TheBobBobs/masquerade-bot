@@ -242,6 +242,13 @@ impl DB {
         Ok(())
     }
 
+    pub async fn is_author(&self, message_id: &str, user_id: &str) -> Result<bool, Error> {
+        let Some(author) = self.get_author(message_id).await? else {
+            return Ok(false);
+        };
+        Ok(author.user_id == user_id)
+    }
+
     pub async fn get_default(
         &self,
         user_id: &str,

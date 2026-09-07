@@ -95,6 +95,9 @@ impl Bot {
 
         let mut sendables = Vec::new();
         let mut push = |c: (Profile, String)| {
+            if c.1.is_empty() {
+                return;
+            }
             let mut send = SendableMessage::new().content(c.1).masquerade(c.0);
             if message.replies.is_some() && sendables.is_empty() {
                 send = send.replies(message.replies.clone().unwrap_or_default());
@@ -130,6 +133,20 @@ impl Bot {
         Ok(sendables)
     }
 
+    async fn delete_message(&self, channel_id: &str, message_id: &str) -> Result<(), Error> {
+        let user_id = self.cache.user_id();
+        if !self
+            .cache
+            .fetch_channel_permissions(&self.http, channel_id, user_id)
+            .await
+            .is_ok_and(|p| p.has(Permission::ManageMessages))
+        {
+            return Err(Error::BotMissing(Permission::ManageMessages));
+        }
+        self.http.delete_message(channel_id, message_id).await?;
+        Ok(())
+    }
+
     async fn on_message(&self, message: &Message) -> Result<(), Error> {
         if message.author_id == self.cache.user_id() {
             return Ok(());
@@ -138,19 +155,7 @@ impl Bot {
         let sendables = self.extract_masq_messages(message).await?;
         if !sendables.is_empty() {
             let mut delete = Some(async {
-                let channel_id = &message.channel_id;
-                let user_id = self.cache.user_id();
-                if self
-                    .cache
-                    .fetch_channel_permissions(&self.http, channel_id, user_id)
-                    .await
-                    .is_ok_and(|p| p.has(Permission::ManageMessages))
-                {
-                    let _ = self
-                        .http
-                        .delete_message(&message.channel_id, &message.id)
-                        .await;
-                }
+                let _ = self.delete_message(&message.channel_id, &message.id).await;
             });
 
             for send in sendables.into_iter().take(10) {
@@ -205,7 +210,35 @@ impl Bot {
                     .await?;
             }
             "delete" => {
-                self.delete_profile(message, rest).await?;
+                if let Some(reply_id) = message.replies.as_ref().and_then(|r| r.first()) {
+                    if !self.db.is_author(reply_id, &message.author_id).await? {
+                        return Ok(());
+                    }
+                    let _ = tokio::join!(
+                        self.delete_message(&message.channel_id, &message.id),
+                        self.http.delete_message(&message.channel_id, reply_id)
+                    );
+                } else {
+                    self.delete_profile(message, rest).await?;
+                }
+            }
+            "edit" => {
+                let Some(reply_id) = message.replies.as_ref().and_then(|r| r.first()) else {
+                    self.http
+                        .send_message(
+                            &message.channel_id,
+                            "You must reply to the message you want to edit.",
+                        )
+                        .await?;
+                    return Ok(());
+                };
+                if !self.db.is_author(reply_id, &message.author_id).await? {
+                    return Ok(());
+                }
+                let _ = tokio::join!(
+                    self.http.edit_message(&message.channel_id, reply_id, rest),
+                    self.http.delete_message(&message.channel_id, &message.id)
+                );
             }
             "list" => {
                 self.list_profiles(message, rest).await?;
