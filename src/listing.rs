@@ -4,22 +4,30 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use volty::{
     http::routes::channels::message_send::SendableMessage,
-    types::channels::message::{Interactions, Message},
+    types::channels::{
+        channel::Channel,
+        message::{Interactions, Message},
+    },
 };
 
 use crate::{models::Profile, Bot, Error};
 
 pub const PER_PAGE: usize = 5;
 
-pub fn get_page(profiles: &[Profile], page: usize) -> String {
+pub fn get_page(profiles: &[Profile], page: usize, include_hidden: bool) -> String {
     static RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)^(#[a-f0-9]{6}|[a-z]+)$").unwrap());
 
     let last_page = (profiles.len().max(1) - 1) / PER_PAGE;
     let mut text = format!(
-        "[](T:L)[](P:{page}){}/{}\n| Name | Display Name | Avatar | Colour |\n|-|-|-|-|",
+        "[](T:L)[](A:{include_hidden})[](P:{page}){}/{}\n",
         page + 1,
         last_page + 1
     );
+    if include_hidden {
+        text.push_str("| Name | Display Name | Avatar | Colour | Hidden |\n|-|-|-|-|-|");
+    } else {
+        text.push_str("| Name | Display Name | Avatar | Colour |\n|-|-|-|-|");
+    }
 
     let start = page * PER_PAGE;
     let end = (start + PER_PAGE).min(profiles.len());
@@ -50,19 +58,37 @@ pub fn get_page(profiles: &[Profile], page: usize) -> String {
             p.colour.as_deref().unwrap_or("")
         )
         .unwrap();
+        if include_hidden {
+            write!(&mut text, "{}|", if p.hidden { "yes" } else { "" }).unwrap();
+        }
     }
 
     text
 }
 
 impl Bot {
-    pub async fn list_profiles(&self, message: &Message) -> Result<(), Error> {
+    pub async fn list_profiles(&self, message: &Message, args: &str) -> Result<(), Error> {
+        let include_hidden = args.split_whitespace().next() == Some("all");
+        if include_hidden {
+            let channel = self.cache.get_channel(&message.channel_id).await.unwrap();
+            if !matches!(channel, Channel::DirectMessage { .. }) {
+                let username = self.cache.user().await.username;
+                let send = SendableMessage::new()
+                    .content(format!(
+                        "`list all` only works in a DM, so hidden profiles never end up in a channel.\n\
+                         Open my profile, choose Message, and send `@{username} list all` there."
+                    ))
+                    .reply(message.id.clone());
+                self.http.send_message(&message.channel_id, send).await?;
+                return Ok(());
+            }
+        }
         let profiles = self
             .db
-            .get_profiles(&message.author_id)
+            .get_profiles(&message.author_id, include_hidden)
             .await
             .unwrap_or_default();
-        let page = get_page(&profiles, 0);
+        let page = get_page(&profiles, 0, include_hidden);
         let send = SendableMessage::new()
             .content(page)
             .interactions(Interactions::new(["👈", "👉"]).restrict())
@@ -78,9 +104,14 @@ impl Bot {
         data: HashMap<&str, &str>,
         emoji_id: &str,
     ) -> Result<(), Error> {
+        let include_hidden: bool = data
+            .get("A")
+            .copied()
+            .and_then(|a| a.parse().ok())
+            .unwrap_or(false);
         let profiles = self
             .db
-            .get_profiles(&reply.author_id)
+            .get_profiles(&reply.author_id, include_hidden)
             .await
             .unwrap_or_default();
         let last_page = (profiles.len().max(1) - 1) / PER_PAGE;
@@ -106,7 +137,7 @@ impl Bot {
             }
             _ => unreachable!(),
         };
-        let page = get_page(&profiles, page);
+        let page = get_page(&profiles, page, include_hidden);
         if Some(&page) == message.content.as_ref() {
             return Ok(());
         }

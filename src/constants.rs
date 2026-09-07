@@ -12,6 +12,7 @@ To remove a field
 `@%DISPLAY_NAME% delete {name}`
 ## List
 `@%DISPLAY_NAME% list`
+`@%DISPLAY_NAME% list all` include hidden profiles (DM only)
 ## Info
 `@%DISPLAY_NAME% author` reply to a message to get original author
 ## Default

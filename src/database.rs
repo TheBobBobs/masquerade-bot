@@ -51,6 +51,8 @@ struct ProfileDoc {
     display_name: Option<String>,
     avatar: Option<String>,
     colour: Option<String>,
+    #[serde(default)]
+    hidden: bool,
 }
 
 impl From<Profile> for ProfileDoc {
@@ -63,6 +65,7 @@ impl From<Profile> for ProfileDoc {
             display_name: value.display_name,
             avatar: value.avatar,
             colour: value.colour,
+            hidden: value.hidden,
         }
     }
 }
@@ -75,6 +78,7 @@ impl From<ProfileDoc> for Profile {
             display_name: value.display_name,
             avatar: value.avatar,
             colour: value.colour,
+            hidden: value.hidden,
         }
     }
 }
@@ -152,10 +156,14 @@ impl DB {
             .cloned()
     }
 
-    pub async fn get_profiles(&self, user_id: &str) -> Option<Vec<Profile>> {
+    pub async fn get_profiles(&self, user_id: &str, include_hidden: bool) -> Option<Vec<Profile>> {
         let user_profiles = self.user_profiles.read().await;
         let profiles = user_profiles.get(user_id)?;
-        let mut profiles: Vec<_> = profiles.values().cloned().collect();
+        let mut profiles: Vec<_> = profiles
+            .values()
+            .filter(|p| include_hidden || !p.hidden)
+            .cloned()
+            .collect();
         profiles.sort_by(|a, b| a.name.cmp(&b.name));
         Some(profiles)
     }

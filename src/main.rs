@@ -202,7 +202,7 @@ impl Bot {
                 self.delete_profile(message, rest).await?;
             }
             "list" => {
-                self.list_profiles(message).await?;
+                self.list_profiles(message, rest).await?;
             }
             "author" => {
                 let Some(reply_id) = message.replies.as_ref().and_then(|r| r.first()) else {

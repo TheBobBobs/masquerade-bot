@@ -33,6 +33,7 @@ pub struct Profile {
         regex(path = *RE_COLOUR, message = "not supported")
     )]
     pub colour: Option<String>,
+    pub hidden: bool,
 }
 
 impl Profile {
@@ -43,6 +44,7 @@ impl Profile {
             display_name: None,
             avatar: None,
             colour: None,
+            hidden: false,
         }
     }
 }
