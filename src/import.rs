@@ -54,7 +54,8 @@ impl Bot {
             return Ok(());
         }
         let export: PluralKitExport = {
-            let url = attatchment.autumn_url("https://autumn.revolt.chat");
+            let api_info = self.cache.api_info(&self.http).await?;
+            let url = attatchment.autumn_url(&api_info.features.autumn.url);
             let Ok(response) = self.requests.get(url).send().await else {
                 self.http
                     .send_message(&message.channel_id, "Failed to download file!")
@@ -89,7 +90,7 @@ impl Bot {
                 &message.channel_id,
                 format!(
                     "Imported {count} Profile{}!",
-                    if count > 1 { "s" } else { "" }
+                    if count != 1 { "s" } else { "" }
                 ),
             )
             .await?;
