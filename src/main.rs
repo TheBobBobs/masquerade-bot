@@ -71,15 +71,18 @@ impl Bot {
         Ok(message)
     }
 
-    async fn extract_masq_messages(
+    async fn extract_masq_message(
         &self,
         message: &Message,
-    ) -> Result<Vec<SendableMessage>, Error> {
+    ) -> Result<Option<SendableMessage>, Error> {
         let Some(content) = &message.content else {
-            return Ok(Vec::new());
+            return Ok(None);
         };
+        if content.is_empty() {
+            return Ok(None);
+        }
         if content.starts_with(self.cache.user_mention()) {
-            return Ok(Vec::new());
+            return Ok(None);
         }
 
         let user_id = &message.author_id;
@@ -89,48 +92,50 @@ impl Bot {
         if let Some(server_id) = server_id
             && self.db.is_proxy_off(user_id, server_id).await
         {
-            return Ok(Vec::new());
+            return Ok(None);
         }
-        let mut default = self.db.get_default(user_id, server_id, channel_id).await;
 
-        let mut sendables = Vec::new();
-        let mut push = |c: (Profile, String)| {
-            if c.1.is_empty() {
-                return;
-            }
-            let mut send = SendableMessage::new().content(c.1).masquerade(c.0);
-            if message.replies.is_some() && sendables.is_empty() {
-                send = send.replies(message.replies.clone().unwrap_or_default());
-            }
-            sendables.push(send);
+        let Some(profiles) = self.db.get_profiles(user_id, true).await else {
+            return Ok(None);
         };
-        let mut current: Option<(Profile, String)> = None;
-        for line in content.lines() {
-            if let Some((name, rest)) = line.split_once(';').map(|(n, r)| (n, r.trim_start()))
-                && let Some(mut profile) = self.db.get_profile(&message.author_id, name).await
-            {
-                self.check_profile(&message.channel_id, &message.author_id, &mut profile)
-                    .await?;
-                if let Some(c) = current {
-                    push(c);
-                }
-                current = Some((profile, rest.to_string()));
-                continue;
-            }
-            if let Some(c) = &mut current {
-                c.1.push('\n');
-                c.1.push_str(line);
-            } else if let Some(default) = default.take() {
-                current = Some((default, line.to_string()));
-            } else {
-                return Ok(Vec::new());
+
+        let mut profiles_by_name: HashMap<String, Profile> =
+            profiles.into_iter().map(|p| (p.name.clone(), p)).collect();
+        let mut profile_tags = Vec::with_capacity(profiles_by_name.len());
+        for profile in profiles_by_name.values() {
+            for tag in &profile.tags {
+                profile_tags.push((tag.clone(), profile.name.clone()))
             }
         }
-        if let Some(c) = current {
-            push(c);
+        profile_tags.sort_by_key(|(b, _)| std::cmp::Reverse(b.len()));
+
+        for (tag, profile_name) in profile_tags {
+            let Some(t) = tag.get_match(content) else {
+                continue;
+            };
+            let mut profile = profiles_by_name.remove(&profile_name).unwrap();
+            self.check_profile(channel_id, user_id, &mut profile)
+                .await?;
+            let replies = message.replies.clone().unwrap_or_default();
+            let send = SendableMessage::new()
+                .content(t)
+                .masquerade(profile.clone())
+                .replies(replies);
+            return Ok(Some(send));
         }
 
-        Ok(sendables)
+        if let Some(mut default) = self.db.get_default(user_id, server_id, channel_id).await {
+            self.check_profile(channel_id, user_id, &mut default)
+                .await?;
+            let replies = message.replies.clone().unwrap_or_default();
+            let send = SendableMessage::new()
+                .content(content)
+                .masquerade(default)
+                .replies(replies);
+            return Ok(Some(send));
+        }
+
+        Ok(None)
     }
 
     async fn delete_message(&self, channel_id: &str, message_id: &str) -> Result<(), Error> {
@@ -152,22 +157,12 @@ impl Bot {
             return Ok(());
         }
 
-        let sendables = self.extract_masq_messages(message).await?;
-        if !sendables.is_empty() {
-            let mut delete = Some(async {
-                let _ = self.delete_message(&message.channel_id, &message.id).await;
-            });
-
-            for send in sendables.into_iter().take(10) {
-                let send = self.send_masq(&message.author_id, &message.channel_id, send);
-                if let Some(delete) = delete.take() {
-                    let (result, _) = join!(send, delete);
-                    result?;
-                } else {
-                    send.await?;
-                }
-            }
-            return Ok(());
+        let sendable = self.extract_masq_message(message).await?;
+        if let Some(send) = sendable {
+            let delete = self.delete_message(&message.channel_id, &message.id);
+            let send = self.send_masq(&message.author_id, &message.channel_id, send);
+            let (result, _) = join!(send, delete);
+            return result.map(|_| ());
         }
 
         let Some(stripped) = message
@@ -197,6 +192,9 @@ impl Bot {
             "name" | "n" => {
                 self.edit_profile(EditCommand::Name, message, rest).await?;
             }
+            "tags" | "tag" => {
+                self.edit_tags(message, rest).await?;
+            }
             "display_name" | "display" | "d" => {
                 self.edit_profile(EditCommand::DisplayName, message, rest)
                     .await?;
@@ -221,6 +219,9 @@ impl Bot {
                 } else {
                     self.delete_profile(message, rest).await?;
                 }
+            }
+            "delete_all" => {
+                self.delete_all_profiles(message, rest).await?;
             }
             "edit" => {
                 let Some(reply_id) = message.replies.as_ref().and_then(|r| r.first()) else {

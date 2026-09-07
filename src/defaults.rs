@@ -1,6 +1,6 @@
 use volty::prelude::*;
 
-use crate::{database::DefaultProfileDocId, Bot, Error};
+use crate::{Bot, Error, database::DefaultProfileDocId};
 
 impl Bot {
     pub async fn default_command(
@@ -43,7 +43,7 @@ impl Bot {
             self.http.send_message(&message.channel_id, send).await?;
             return Ok(());
         };
-        let Some(profile) = self.db.get_profile(&message.author_id, name).await else {
+        let Some(mut profile) = self.db.get_profile(&message.author_id, name).await else {
             let send = SendableMessage::new()
                 .content("Profile doesn't exist!")
                 .reply(message.id.clone());
@@ -52,6 +52,8 @@ impl Bot {
         };
         self.db.set_default(id, Some(name)).await?;
 
+        self.check_profile(&message.channel_id, &message.author_id, &mut profile)
+            .await?;
         let send = SendableMessage::new()
             .content("Success!")
             .masquerade(profile)

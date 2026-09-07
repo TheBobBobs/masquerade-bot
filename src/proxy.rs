@@ -1,6 +1,6 @@
 use volty::prelude::*;
 
-use crate::{database::ProxyOffDocId, Bot, Error};
+use crate::{Bot, Error, database::ProxyOffDocId};
 
 impl Bot {
     pub async fn proxy_command(&self, message: &Message, args: &str) -> Result<(), Error> {

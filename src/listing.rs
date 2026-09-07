@@ -10,7 +10,7 @@ use volty::{
     },
 };
 
-use crate::{models::Profile, Bot, Error};
+use crate::{Bot, Error, models::Profile};
 
 pub const PER_PAGE: usize = 5;
 

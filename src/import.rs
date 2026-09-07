@@ -1,4 +1,7 @@
-use crate::{Bot, Error, models::Profile};
+use crate::{
+    Bot, Error,
+    models::{Profile, ProfileTag},
+};
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 use volty::{
@@ -6,6 +9,17 @@ use volty::{
     prelude::*,
     types::util::regex::RE_USERNAME,
 };
+
+fn truncate_chars(text: &mut String, len: usize) {
+    if let Some((new_len, _)) = text
+        .char_indices()
+        .take(len)
+        .filter(|(i, _)| *i <= len)
+        .last()
+    {
+        text.truncate(new_len);
+    };
+}
 
 #[derive(Deserialize)]
 #[serde(untagged)]
@@ -27,6 +41,7 @@ impl Export {
                 .map(|p| Profile {
                     user_id: user_id.to_string(),
                     name: p.name.trim().to_string(),
+                    tags: p.tags.into_iter().map(|t| t.into()).collect(),
                     display_name: p.display_name.map(|d| d.trim().to_string()),
                     avatar: p.avatar_url,
                     colour: p.color.map(|c| c.to_string()),
@@ -39,8 +54,12 @@ impl Export {
                 .map(|m| Profile {
                     user_id: user_id.to_string(),
                     name: m.name.trim().to_string(),
-                    display_name: m.display_name.map(|d| d.trim().to_string()),
-                    avatar: m.avatar_url,
+                    tags: m.proxy_tags.into_iter().map(|t| t.into()).collect(),
+                    display_name: m.display_name.and_then(|d| {
+                        let d = d.trim();
+                        (!d.is_empty()).then_some(d.to_string())
+                    }),
+                    avatar: m.avatar_url.and_then(|u| (!u.is_empty()).then_some(u)),
                     colour: m.color.map(|c| format!("#{c}")),
                     hidden: m
                         .privacy
@@ -51,18 +70,48 @@ impl Export {
             Export::Tupper(export) => export
                 .tuppers
                 .into_iter()
-                .map(|m| Profile {
-                    user_id: user_id.to_string(),
-                    name: m.name.trim().to_string(),
-                    display_name: m.nick.map(|n| n.trim().to_string()),
-                    avatar: m.avatar_url,
-                    colour: None,
-                    hidden: false,
+                .map(|m| {
+                    let mut tags = Vec::with_capacity(m.brackets.len() / 2);
+                    let (chunks, _rest) = m.brackets.as_chunks::<2>();
+                    for [prefix, suffix] in chunks {
+                        let tag = ProfileTag {
+                            prefix: prefix.clone().and_then(|p| (!p.is_empty()).then_some(p)),
+                            suffix: suffix.clone().and_then(|s| (!s.is_empty()).then_some(s)),
+                        };
+                        tags.push(tag);
+                    }
+                    Profile {
+                        user_id: user_id.to_string(),
+                        name: m.name.trim().to_string(),
+                        tags,
+                        display_name: m.nick.and_then(|n| {
+                            let n = n.trim();
+                            (!n.is_empty()).then_some(n.to_string())
+                        }),
+                        avatar: m.avatar_url.and_then(|u| (!u.is_empty()).then_some(u)),
+                        colour: None,
+                        hidden: false,
+                    }
                 })
                 .collect(),
         };
 
         for profile in &mut profiles {
+            if profile.name.len() >= 32 {
+                truncate_chars(&mut profile.name, 32);
+            }
+            if let Some(display_name) = &mut profile.display_name
+                && display_name.len() >= 32
+            {
+                truncate_chars(display_name, 32);
+            }
+
+            if profile.name.is_empty()
+                && let Some(name) = &profile.display_name
+            {
+                profile.name = name.clone();
+            }
+
             if !RE_USERNAME.is_match(&profile.name) {
                 if profile.display_name.is_none() {
                     profile.display_name = Some(profile.name.clone());
@@ -72,6 +121,8 @@ impl Export {
                     "",
                 );
             }
+
+            profile.tags.truncate(16);
         }
 
         if let Some((p, e)) = profiles
@@ -91,8 +142,33 @@ struct MasqExport {
 }
 
 #[derive(Deserialize, Serialize)]
+struct MasqTag {
+    prefix: Option<String>,
+    suffix: Option<String>,
+}
+
+impl From<ProfileTag> for MasqTag {
+    fn from(value: ProfileTag) -> Self {
+        Self {
+            prefix: value.prefix,
+            suffix: value.suffix,
+        }
+    }
+}
+
+impl From<MasqTag> for ProfileTag {
+    fn from(value: MasqTag) -> Self {
+        Self {
+            prefix: value.prefix.and_then(|p| (!p.is_empty()).then_some(p)),
+            suffix: value.suffix.and_then(|s| (!s.is_empty()).then_some(s)),
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize)]
 struct MasqMember {
     name: String,
+    tags: Vec<MasqTag>,
     display_name: Option<String>,
     avatar_url: Option<String>,
     color: Option<String>,
@@ -105,6 +181,21 @@ struct PluralKitExport {
 }
 
 #[derive(Deserialize)]
+struct PluralKitTags {
+    prefix: Option<String>,
+    suffix: Option<String>,
+}
+
+impl From<PluralKitTags> for ProfileTag {
+    fn from(value: PluralKitTags) -> Self {
+        Self {
+            prefix: value.prefix.and_then(|p| (!p.is_empty()).then_some(p)),
+            suffix: value.suffix.and_then(|s| (!s.is_empty()).then_some(s)),
+        }
+    }
+}
+
+#[derive(Deserialize)]
 struct PluralKitPrivacy {
     visibility: Option<String>,
 }
@@ -112,6 +203,7 @@ struct PluralKitPrivacy {
 #[derive(Deserialize)]
 struct PluralKitMember {
     name: String,
+    proxy_tags: Vec<PluralKitTags>,
     display_name: Option<String>,
     avatar_url: Option<String>,
     color: Option<String>,
@@ -126,6 +218,7 @@ struct TupperBoxExport {
 #[derive(Deserialize)]
 struct TupperBoxMember {
     name: String,
+    brackets: Vec<Option<String>>,
     nick: Option<String>,
     avatar_url: Option<String>,
 }
@@ -144,6 +237,7 @@ impl Bot {
                 .into_iter()
                 .map(|p| MasqMember {
                     name: p.name,
+                    tags: p.tags.into_iter().map(|t| t.into()).collect(),
                     display_name: p.display_name,
                     avatar_url: p.avatar,
                     color: p.colour,
@@ -177,7 +271,7 @@ impl Bot {
                 .await?;
             return Ok(());
         };
-        if attatchment.size > (256 * 1024) {
+        if attatchment.size > (512 * 1024) {
             self.http
                 .send_message(&message.channel_id, "File too large!")
                 .await?;
@@ -246,10 +340,10 @@ mod tests {
     #[test]
     fn import_hides_members_with_private_visibility() {
         let json = r#"{"members": [
-            {"name": "alice", "privacy": {"visibility": "public"}},
-            {"name": "bob", "privacy": {"visibility": "private"}},
-            {"name": "carol", "privacy": null},
-            {"name": "dave"}
+            {"name": "alice", "proxy_tags": [], "privacy": {"visibility": "public"}},
+            {"name": "bob", "proxy_tags": [], "privacy": {"visibility": "private"}},
+            {"name": "carol", "proxy_tags": [], "privacy": null},
+            {"name": "dave", "proxy_tags": []}
         ]}"#;
         let export: Export = serde_json::from_str(json).unwrap();
         let profiles = export.into_profiles("user").unwrap();

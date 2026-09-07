@@ -2,17 +2,17 @@ use std::collections::{HashMap, HashSet};
 
 use futures::stream::TryStreamExt;
 use mongodb::{
+    Client, Collection,
     bson::{doc, to_document},
     options::ClientOptions,
-    Client, Collection,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use validator::Validate;
 
 use crate::{
-    models::{Author, Profile},
     Error,
+    models::{Author, Profile, ProfileTag},
 };
 
 #[derive(Deserialize, Serialize)]
@@ -45,9 +45,34 @@ struct ProfileDocId {
     user_id: String,
 }
 
+#[derive(Clone, Deserialize, Serialize)]
+struct ProfileDocTag {
+    prefix: Option<String>,
+    suffix: Option<String>,
+}
+
+impl From<ProfileTag> for ProfileDocTag {
+    fn from(value: ProfileTag) -> Self {
+        Self {
+            prefix: value.prefix,
+            suffix: value.suffix,
+        }
+    }
+}
+
+impl From<ProfileDocTag> for ProfileTag {
+    fn from(value: ProfileDocTag) -> Self {
+        Self {
+            prefix: value.prefix,
+            suffix: value.suffix,
+        }
+    }
+}
+
 #[derive(Deserialize, Serialize)]
 struct ProfileDoc {
     _id: ProfileDocId,
+    tags: Option<Vec<ProfileDocTag>>,
     display_name: Option<String>,
     avatar: Option<String>,
     colour: Option<String>,
@@ -62,6 +87,7 @@ impl From<Profile> for ProfileDoc {
                 name: value.name,
                 user_id: value.user_id,
             },
+            tags: Some(value.tags.into_iter().map(|t| t.into()).collect()),
             display_name: value.display_name,
             avatar: value.avatar,
             colour: value.colour,
@@ -72,9 +98,20 @@ impl From<Profile> for ProfileDoc {
 
 impl From<ProfileDoc> for Profile {
     fn from(value: ProfileDoc) -> Self {
+        let tags = if let Some(tags) = value.tags
+            && !tags.is_empty()
+        {
+            tags.into_iter().map(|t| t.into()).collect()
+        } else {
+            vec![ProfileTag {
+                prefix: Some(format!("{};", value._id.name)),
+                suffix: None,
+            }]
+        };
         Self {
             user_id: value._id.user_id,
             name: value._id.name,
+            tags,
             display_name: value.display_name,
             avatar: value.avatar,
             colour: value.colour,

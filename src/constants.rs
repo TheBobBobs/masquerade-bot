@@ -3,6 +3,8 @@ pub const HELP_MESSAGE: &str = "## Create
 ## Use
 `name;Text you want to send.`
 ## Edit
+`@%DISPLAY_NAME% tags {name} {tag}`
+`@%DISPLAY_NAME% tags {name} set|add|remove {tag}`
 `@%DISPLAY_NAME% display {name} {display_name}`
 `@%DISPLAY_NAME% avatar {name} {url}`
 `@%DISPLAY_NAME% colour {name} {colour}`
